@@ -45,7 +45,59 @@ def count_text_length(text: str) -> float:
             length += 1.0
     return length
 
-def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], font_size_fixed: int, font_size_offset: int, font_size_minimum: int):  
+def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], max_area_ratio: float = 0.2) -> List:
+    """
+    Find, for each text region, the inner rectangle of the speech bubble surrounding it.
+
+    Works on the inpainted image: the bubble interior is a large uniform bright area
+    once the original text has been removed. Returns a list of [x1, y1, x2, y2] or None.
+    """
+    rects = [None] * len(text_regions)
+    if len(text_regions) == 0:
+        return rects
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img
+    bright = (gray > 200).astype(np.uint8)
+    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(bright, connectivity=4)
+    img_area = img.shape[0] * img.shape[1]
+
+    region_labels = []
+    for region in text_regions:
+        x1, y1, x2, y2 = [int(v) for v in region.xyxy]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(img.shape[1], x2), min(img.shape[0], y2)
+        patch = labels[y1:y2, x1:x2]
+        patch = patch[patch > 0]
+        if patch.size == 0:
+            region_labels.append(0)
+            continue
+        label = int(np.bincount(patch).argmax())
+        region_labels.append(label)
+
+    for i, (region, label) in enumerate(zip(text_regions, region_labels)):
+        # Skip background, shared bubbles (several regions in one bubble) and rotated text
+        if label == 0 or region_labels.count(label) > 1 or abs(region.angle) > 0.1:
+            continue
+        bx, by, bw, bh, area = stats[label]
+        if area > img_area * max_area_ratio or area < bw * bh * 0.4:
+            continue
+        rx1, ry1, rx2, ry2 = region.xyxy
+        if area < (rx2 - rx1) * (ry2 - ry1):
+            continue
+        component = labels[by:by + bh, bx:bx + bw] == label
+        cx, cy = bw / 2, bh / 2
+        # Shrink the bubble bounding box until it lies (almost) entirely inside the bubble
+        for factor in np.arange(0.9, 0.55, -0.05):
+            hw, hh = bw * factor / 2, bh * factor / 2
+            ix1, iy1, ix2, iy2 = int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)
+            inner = component[iy1:iy2, ix1:ix2]
+            if inner.size and inner.mean() >= 0.97:
+                rect = [bx + ix1, by + iy1, bx + ix2, by + iy2]
+                if (rect[2] - rect[0]) * (rect[3] - rect[1]) > (rx2 - rx1) * (ry2 - ry1):
+                    rects[i] = rect
+                break
+    return rects
+
+def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], font_size_fixed: int, font_size_offset: int, font_size_minimum: int, max_box_expansion: float = 1.15, fit_to_bubble: bool = True):  
     """
     Adjust text region size to accommodate font size and translated text length.
     
@@ -66,8 +118,10 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
     # logger.debug(f'font_size_minimum {font_size_minimum}')  
     font_size_minimum = max(1, font_size_minimum)  
 
+    bubble_rects = find_bubble_rects(img, text_regions) if fit_to_bubble else [None] * len(text_regions)
+
     dst_points_list = []  
-    for region in text_regions: 
+    for region, bubble_rect in zip(text_regions, bubble_rects): 
     
         # Store and validate original font size
         original_region_font_size = region.font_size  
@@ -89,8 +143,15 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
         # Single-axis text box expansion
         single_axis_expanded = False
         dst_points = None
-        
-        if region.horizontal: 
+
+        # Use the whole speech bubble when one was found
+        region._bubble_fitted = bubble_rect is not None
+        if bubble_rect is not None:
+            x1, y1, x2, y2 = bubble_rect
+            dst_points = np.array([[[x1, y1], [x2, y1], [x2, y2], [x1, y2]]], dtype=np.int64)
+            single_axis_expanded = True
+
+        elif region.horizontal: 
             used_rows = len(region.texts)
             # logger.debug(f"Horizontal text - used rows: {used_rows}")
             
@@ -105,7 +166,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             # logger.debug(f"Needed rows: {needed_rows}")                
 
             if needed_rows > used_rows:
-                scale_x = ((needed_rows - used_rows) / used_rows) * 1 + 1
+                scale_x = min(((needed_rows - used_rows) / used_rows) * 1 + 1, max_box_expansion)
                 try:  
                     poly = Polygon(region.unrotated_min_rect[0])
                     minx, miny, maxx, maxy = poly.bounds
@@ -126,7 +187,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                     # logger.error(f"Failed to expand horizontal text: {e}")  
                     pass
                     
-        if region.vertical:
+        elif region.vertical:
             used_cols = len(region.texts)
             # logger.debug(f"Vertical text - used columns: {used_cols}")
             
@@ -138,7 +199,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             needed_cols = len(line_text_list)
             # logger.debug(f"Needed columns: {needed_cols}") 
             if needed_cols > used_cols:
-                scale_x = ((needed_cols - used_cols) / used_cols) * 1 + 1
+                scale_x = min(((needed_cols - used_cols) / used_cols) * 1 + 1, max_box_expansion)
                 try:  
                     poly = Polygon(region.unrotated_min_rect[0])
                     minx, miny, maxx, maxy = poly.bounds
@@ -172,7 +233,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                 font_increase_ratio = 1 + (increase_percentage * 0.3)
                 font_increase_ratio = min(1.5, max(1.0, font_increase_ratio))
                 # logger.debug(f"Translation is {increase_percentage:.2%} longer, font increase ratio: {font_increase_ratio:.2f}")
-                target_font_size = int(target_font_size * font_increase_ratio)
+                # target_font_size = int(target_font_size * font_increase_ratio)  # disabled: longer text should not get a bigger font
                 # logger.debug(f"Adjusted target font size: {target_font_size}")
                 # Need greater bounding box scaling to accommodate larger font size and longer text
                 target_scale = max(1, min(1 + increase_percentage * 0.3, 2))  # Possibly max(1, min(1 + (font_increase_ratio-1), 2))
@@ -199,7 +260,7 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             font_size_scale = (((target_font_size - original_region_font_size) / original_region_font_size) * 0.4 + 1) if original_region_font_size > 0 else 1.0  
             # logger.debug(f"Font size ratio: ({target_font_size} / {original_region_font_size})")  
             final_scale = max(font_size_scale, target_scale)
-            final_scale = max(1, min(final_scale, 1.1))  
+            final_scale = max(1, min(final_scale, 1.1, max_box_expansion))  
             
             # logger.debug(f"Final scaling factor: {final_scale:.2f}")  
 
@@ -226,6 +287,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             else:
                 dst_points = region.min_rect
 
+        # Keep boxes inside the image
+        dst_points = np.asarray(dst_points).reshape(-1, 4, 2).copy()
+        dst_points[..., 0] = dst_points[..., 0].clip(0, img.shape[1] - 1)
+        dst_points[..., 1] = dst_points[..., 1].clip(0, img.shape[0] - 1)
+
         # Store results and update font size
         dst_points_list.append(dst_points)  
         region.font_size = int(target_font_size)
@@ -242,14 +308,16 @@ async def dispatch(
     hyphenate: bool = True,
     render_mask: np.ndarray = None,
     line_spacing: int = None,
-    disable_font_border: bool = False
+    disable_font_border: bool = False,
+    max_box_expansion: float = 1.15,
+    fit_to_bubble: bool = True
     ) -> np.ndarray:
 
     text_render.set_font(font_path)
     text_regions = list(filter(lambda region: region.translation, text_regions))
 
     # Resize regions that are too small
-    dst_points_list = resize_regions_to_font_size(img, text_regions, font_size_fixed, font_size_offset, font_size_minimum)
+    dst_points_list = resize_regions_to_font_size(img, text_regions, font_size_fixed, font_size_offset, font_size_minimum, max_box_expansion, fit_to_bubble)
 
     # TODO: Maybe remove intersections
 
@@ -359,7 +427,10 @@ def render(
          
                 # The line is full, and there should be no empty columns on the left side of the text. Otherwise, when multiple text boxes are aligned on the left, the translated text cannot be aligned. Common scenarios: borderless comics, comic postscript.  
                 # When there are bubbles on the current page, it can be changed to center: box[0:h, w_ext:w_ext+w] = temp_box, requiring more accurate bubble detection. But not changing it doesn't have much impact.
-                box[0:h, 0:w] = temp_box  
+                if getattr(region, '_bubble_fitted', False):
+                    box[0:h, w_ext:w_ext+w] = temp_box
+                else:
+                    box[0:h, 0:w] = temp_box  
             else:  
                 #print("w_ext < 0, using original temp_box")  
                 box = temp_box.copy()  
@@ -377,7 +448,10 @@ def render(
                 #print(f"Placing temp_box at position [0:h, 0:w] = [0:{h}, 0:{w}]")  
                 # The rows are full, and there should be no empty lines above the text; otherwise, when multiple text boxes have their top edges aligned, the text cannot be aligned. Common scenario: borderless comics, CG. 
                 # When there are bubbles on the current page, it can be changed to center: box[h_ext:h_ext+h, 0:w] = temp_box, requiring more accurate bubble detection.
-                box[0:h, 0:w] = temp_box  
+                if getattr(region, '_bubble_fitted', False):
+                    box[h_ext:h_ext+h, 0:w] = temp_box
+                else:
+                    box[0:h, 0:w] = temp_box  
             else:   
                 #print("h_ext < 0, using original temp_box")  
                 box = temp_box.copy()   

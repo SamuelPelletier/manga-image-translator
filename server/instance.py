@@ -1,5 +1,5 @@
 from asyncio import Event, Lock
-from typing import List
+from typing import List, Optional
 
 from PIL import Image
 from pydantic import BaseModel
@@ -11,15 +11,19 @@ class ExecutorInstance(BaseModel):
     ip: str
     port: int
     busy: bool = False
+    nonce: Optional[str] = None
+
+    def _headers(self):
+        return {"X-Nonce": self.nonce} if self.nonce and self.nonce != "None" else {}
 
     def free_executor(self):
         self.busy = False
 
     async def sent(self, image: Image, config: Config):
-        return await fetch_data("http://"+self.ip+":"+str(self.port)+"/simple_execute/translate", image, config)
+        return await fetch_data("http://"+self.ip+":"+str(self.port)+"/simple_execute/translate", image, config, headers=self._headers())
 
     async def sent_stream(self, image: Image, config: Config, sender: NotifyType):
-        await fetch_data_stream("http://"+self.ip+":"+str(self.port)+"/execute/translate", image, config, sender)
+        await fetch_data_stream("http://"+self.ip+":"+str(self.port)+"/execute/translate", image, config, sender, headers=self._headers())
 
     async def sent_batch(self, images: List[Image.Image], config: Config, batch_size: int):
         """发送批量翻译请求"""

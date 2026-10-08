@@ -180,6 +180,10 @@ class RenderConfig(BaseModel):
     """Line spacing is font_size * this value. Default is 0.01 for horizontal text and 0.2 for vertical."""
     font_size: Optional[int] = None
     """Use fixed font size for rendering"""
+    max_box_expansion: float = 1.15
+    """Maximum factor by which a text box may be enlarged to fit a longer translation. 1.0 keeps the detected box size; the text is shrunk to fit instead"""
+    fit_to_bubble: bool = True
+    """Render the translation using the whole speech bubble around the detected text instead of only the original text box"""
     rtl: bool = True
     """Right-to-left reading order for panel and text_region sorting,"""  
     _font_color_fg = None
@@ -275,7 +279,7 @@ class DetectorConfig(BaseModel):
     """"Text detector used for creating a text mask from an image, DO NOT use craft for manga, it\'s not designed for it"""
     detection_size: int = 2048
     """Size of image used for detection"""
-    text_threshold: float = 0.5
+    text_threshold: float = 0.4
     """Threshold for text detection"""
     det_rotate: bool = False
     """Rotate the image for detection. Might improve detection."""
@@ -285,7 +289,7 @@ class DetectorConfig(BaseModel):
     """Invert the image colors for detection. Might improve detection."""
     det_gamma_correct: bool = False
     """Applies gamma correction for detection. Might improve detection."""
-    box_threshold: float = 0.7
+    box_threshold: float = 0.5
     """Threshold for bbox generation"""
     unclip_ratio: float = 2.3
     """How much to extend text skeleton to form bounding box"""

@@ -68,7 +68,7 @@ class JparacrawlTranslator(OfflineTranslator):
             'to_lang': to_lang,
             'device': device,
         }
-        if device == 'xpu':
+        if device in ('xpu', 'mps'):
             self.logger.warning(f'ctranslate2 does not support device "{device}", falling back to CPU')
             ct2_device = 'cpu'
         else:
