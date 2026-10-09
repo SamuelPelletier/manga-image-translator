@@ -51,14 +51,16 @@ for entry in "$INPUT_DIR"/*/; do
     name="$(basename "$entry")"
     if [[ "$name" =~ ^[A-Z]{3}$ ]]; then
         # Dossier de langue (ex. FRA/<id manga>/) : traduit vers cette langue
-        lang_config="$(mktemp)"
+        # Le traducteur reconnaît le format à l'extension : il faut un .json
+        lang_dir="$(mktemp -d)"
+        lang_config="$lang_dir/config.json"
         venv/bin/python -c 'import json,sys; c=json.load(open(sys.argv[1])); c.setdefault("translator",{})["target_lang"]=sys.argv[2]; json.dump(c,open(sys.argv[3],"w"))' \
             "$CONFIG_FILE" "$name" "$lang_config"
         for manga in "$entry"/*/; do
             manga="${manga%/}"
             translate "$manga" "$OUTPUT_DIR/$name/$(basename "$manga")" "$lang_config"
         done
-        rm -f "$lang_config"
+        rm -rf "$lang_dir"
     else
         # Dossier de série classique : langue de config.json
         translate "$entry" "$OUTPUT_DIR/$name" "$CONFIG_FILE"
