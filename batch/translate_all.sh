@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Traduit tous les mangas de INPUT_DIR vers OUTPUT_DIR (même arborescence).
+# Un dossier nommé par un code langue (FRA, ENG, ESP...) contient des dossiers de
+# mangas à traduire vers cette langue ; les autres dossiers utilisent config.json.
 # Les pages déjà traduites sont ignorées : on peut relancer le script sans risque.
 #
 # Usage : batch/translate_all.sh [INPUT_DIR] [OUTPUT_DIR]
@@ -31,15 +33,35 @@ echo "[$(date)] Traduction de $INPUT_DIR -> $OUTPUT_DIR" | tee -a "$LOG_FILE"
 
 shopt -s nullglob
 status=0
-for series in "$INPUT_DIR"/*/; do
-    series="${series%/}"
-    name="$(basename "$series")"
-    echo "[$(date)] === $name ===" | tee -a "$LOG_FILE"
+
+# translate <dossier source> <dossier destination> <fichier config>
+translate() {
+    local src="$1" dest="$2" config="$3"
+    echo "[$(date)] === ${src#$INPUT_DIR/} ===" | tee -a "$LOG_FILE"
     if ! venv/bin/python -m manga_translator local \
-            -i "$series" -o "$OUTPUT_DIR/$name" \
-            --config-file "$CONFIG_FILE" 2>&1 | tee -a "$LOG_FILE"; then
-        echo "[$(date)] ERREUR sur $name (voir $LOG_FILE)" | tee -a "$LOG_FILE"
+            -i "$src" -o "$dest" \
+            --config-file "$config" 2>&1 | tee -a "$LOG_FILE"; then
+        echo "[$(date)] ERREUR sur ${src#$INPUT_DIR/} (voir $LOG_FILE)" | tee -a "$LOG_FILE"
         status=1
+    fi
+}
+
+for entry in "$INPUT_DIR"/*/; do
+    entry="${entry%/}"
+    name="$(basename "$entry")"
+    if [[ "$name" =~ ^[A-Z]{3}$ ]]; then
+        # Dossier de langue (ex. FRA/<id manga>/) : traduit vers cette langue
+        lang_config="$(mktemp)"
+        venv/bin/python -c 'import json,sys; c=json.load(open(sys.argv[1])); c.setdefault("translator",{})["target_lang"]=sys.argv[2]; json.dump(c,open(sys.argv[3],"w"))' \
+            "$CONFIG_FILE" "$name" "$lang_config"
+        for manga in "$entry"/*/; do
+            manga="${manga%/}"
+            translate "$manga" "$OUTPUT_DIR/$name/$(basename "$manga")" "$lang_config"
+        done
+        rm -f "$lang_config"
+    else
+        # Dossier de série classique : langue de config.json
+        translate "$entry" "$OUTPUT_DIR/$name" "$CONFIG_FILE"
     fi
 done
 
