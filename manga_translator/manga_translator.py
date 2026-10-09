@@ -45,6 +45,9 @@ from .rendering import dispatch as dispatch_rendering, dispatch_eng_render, disp
 # Will be overwritten by __main__.py if module is being run directly (with python -m)
 logger = logging.getLogger('manga_translator')
 
+# Target languages whose translations use CJK brackets/quotes (「」『』【】)
+CJK_PUNCTUATION_LANGS = ('CHS', 'CHT', 'JPN')
+
 # 全局console实例，用于日志重定向
 _global_console = None
 _log_console = None
@@ -1156,8 +1159,10 @@ class MangaTranslator:
             ["】", "]"],  
         ]
 
+        # Only for CJK targets: otherwise e.g. the French apostrophe ’ would become 」
+        uses_cjk_punctuation = config.translator.target_lang in CJK_PUNCTUATION_LANGS
         for region in ctx.text_regions:
-            if region.text and region.translation:
+            if region.text and region.translation and uses_cjk_punctuation:
                 if '『' in region.text and '』' in region.text:
                     quote_type = '『』'
                 elif '「' in region.text and '」' in region.text:
@@ -2393,8 +2398,10 @@ class MangaTranslator:
             ["】", "]"],  
         ]
 
+        # Only for CJK targets: otherwise e.g. the French apostrophe ’ would become 」
+        uses_cjk_punctuation = config.translator.target_lang in CJK_PUNCTUATION_LANGS
         for region in ctx.text_regions:
-            if region.text and region.translation:
+            if region.text and region.translation and uses_cjk_punctuation:
                 # 引号处理逻辑
                 if '『' in region.text and '』' in region.text:
                     quote_type = '『』'
