@@ -1,0 +1,23 @@
+{
+  "translator": {
+    "translator": "custom_openai",
+    "target_lang": "FRA"
+  },
+  "detector": {
+    "detector": "default",
+    "detection_size": 2048,
+    "text_threshold": 0.4,
+    "box_threshold": 0.5,
+    "unclip_ratio": 2.3
+  },
+  "inpainter": {
+    "inpainter": "lama_large",
+    "inpainting_size": 1536,
+    "inpainting_precision": "fp32"
+  },
+  "render": {
+    "direction": "auto",
+    "fit_to_bubble": true,
+    "max_box_expansion": 1.15
+  }
+}
