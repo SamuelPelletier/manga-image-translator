@@ -17,7 +17,7 @@ LOG_DIR="${LOG_DIR:-$APP_DIR/batch/logs}"
 LOCK_FILE="${LOCK_FILE:-/tmp/manga-translate.lock}"
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
-LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d_%H-%M-%S).log"
+LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d_%H-%M-%S)_$$.log"
 
 # Un seul lancement à la fois (utile avec cron)
 exec 9>"$LOCK_FILE"
@@ -35,6 +35,7 @@ echo "[$(date)] Traduction de $INPUT_DIR -> $OUTPUT_DIR" | tee -a "$LOG_FILE"
 
 shopt -s nullglob
 status=0
+worked=0
 
 count_images() {
     find "$1" -type f 2>/dev/null | grep -Eic '\.(jpe?g|png|webp)$' || true
@@ -49,6 +50,7 @@ translate() {
     if [[ "$mark_done" == 1 && -f "$dest/.done" ]]; then
         return
     fi
+    worked=1
     echo "[$(date)] === $label ===" | tee -a "$LOG_FILE"
 
     local run_log
@@ -95,7 +97,11 @@ for entry in "$INPUT_DIR"/*/; do
         lang_config="$lang_dir/config.json"
         venv/bin/python -c 'import json,sys; c=json.load(open(sys.argv[1])); c.setdefault("translator",{})["target_lang"]=sys.argv[2]; json.dump(c,open(sys.argv[3],"w"))' \
             "$CONFIG_FILE" "$name" "$lang_config"
-        for manga in "$entry"/*/; do
+        mangas=("$entry"/*/)
+        if [[ ${#mangas[@]} -eq 0 ]]; then
+            continue
+        fi
+        for manga in "${mangas[@]}"; do
             manga="${manga%/}"
             translate "$manga" "$OUTPUT_DIR/$name/$(basename "$manga")" "$lang_config" 1
         done
@@ -106,5 +112,10 @@ for entry in "$INPUT_DIR"/*/; do
     fi
 done
 
-echo "[$(date)] Terminé." | tee -a "$LOG_FILE"
+if [[ "$worked" == 0 ]]; then
+    # Rien à traduire : pas de journal (le cron tourne souvent)
+    rm -f "$LOG_FILE"
+else
+    echo "[$(date)] Terminé." | tee -a "$LOG_FILE"
+fi
 exit $status
