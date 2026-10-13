@@ -45,7 +45,7 @@ def count_text_length(text: str) -> float:
             length += 1.0
     return length
 
-def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside: float = 0.995) -> List:
+def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside: float = 0.999) -> List:
     """
     Find, for each text region, a rectangle of free space around it inside its speech bubble.
 
@@ -162,7 +162,7 @@ def fit_horizontal_font_size(text: str, width: int, height: int, font_size_min: 
         needed_h = font_size * len(lines) + int(font_size * spacing) * (len(lines) - 1)
         # calc_horizontal may let a line go slightly over max_width: accept it, the box is
         # squeezed a bit when rendered, which is not visible
-        return max(widths) <= width * 1.1 and needed_h <= height
+        return max(widths) <= width * 1.05 and needed_h <= height
 
     font_size_min = max(1, min(font_size_min, font_size_max))
     low, high = font_size_min, font_size_max
@@ -388,11 +388,12 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                             max(font_size_minimum, int(original_region_font_size * font_size_max_scale)),
                             getattr(region, "target_lang", "en_US"))
                 target_font_size = fit_horizontal_font_size(*fit_args, hyphenate, line_spacing)
-                # Narrow box: when whole words force the text under the minimum size,
+                # Narrow box or long word: when whole words make the text too small,
                 # hyphenate at syllables instead ("MORN-ING")
-                if not hyphenate and target_font_size < font_size_minimum:
+                if not hyphenate:
                     hyphenated_size = fit_horizontal_font_size(*fit_args, True, line_spacing)
-                    if hyphenated_size > target_font_size:
+                    if (hyphenated_size > target_font_size and target_font_size < font_size_minimum) \
+                            or hyphenated_size >= target_font_size * 1.2:
                         target_font_size = hyphenated_size
                         region._hyphenate = True
 
