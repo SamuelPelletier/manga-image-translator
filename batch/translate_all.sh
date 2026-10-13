@@ -15,6 +15,9 @@ OUTPUT_DIR="${2:-${OUTPUT_DIR:-$HOME/manga/output}}"
 CONFIG_FILE="${CONFIG_FILE:-$APP_DIR/batch/config.json}"
 LOG_DIR="${LOG_DIR:-$APP_DIR/batch/logs}"
 LOCK_FILE="${LOCK_FILE:-/tmp/manga-translate.lock}"
+# Police de BD et qualité JPEG des pages traduites
+FONT_PATH="${FONT_PATH:-$APP_DIR/fonts/anime_ace_3.ttf}"
+SAVE_QUALITY="${SAVE_QUALITY:-85}"
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d_%H-%M-%S)_$$.log"
@@ -56,9 +59,9 @@ translate() {
     local run_log
     run_log="$(mktemp)"
     local ok=1
-    if ! venv/bin/python -m manga_translator local \
+    if ! venv/bin/python -m manga_translator --font-path "$FONT_PATH" local \
             -i "$src" -o "$dest" \
-            --config-file "$config" 2>&1 | tee -a "$LOG_FILE" "$run_log"; then
+            --config-file "$config" --save-quality "$SAVE_QUALITY" 2>&1 | tee -a "$LOG_FILE" "$run_log"; then
         ok=0
     fi
     # Le traducteur sort avec le code 0 même quand une page échoue : on lit son journal

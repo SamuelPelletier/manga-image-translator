@@ -18,6 +18,8 @@
   "render": {
     "direction": "auto",
     "fit_to_bubble": true,
-    "max_box_expansion": 1.15
+    "max_box_expansion": 1.15,
+    "uppercase": true,
+    "no_hyphenation": true
   }
 }

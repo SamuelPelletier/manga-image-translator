@@ -177,6 +177,17 @@ class CustomOpenAiTranslator(ConfigGPT, CommonTranslator):
 
             # self.logger.debug('-- GPT Response (filtered) --\n' + response)
 
+            # Read the translations by their <|n|> number, not by their order: the model sometimes
+            # leaves junk such as "<|5>><|6|>...", which used to become a ">" translation and shift
+            # every following translation to the wrong bubble.
+            numbered = self.parse_numbered_translations(response, query_size)
+            if numbered is not None:
+                missing = [i + 1 for i, t in enumerate(numbered) if not t]
+                if missing:
+                    self.logger.warning(f'No translation returned for lines {missing}')
+                translations.extend(numbered)
+                continue
+
             # @NOTE: This should *should* be superflous now, due to `extract_capture_groups`:
             # 
             # Remove any text preceeding the first translation.
@@ -213,6 +224,24 @@ class CustomOpenAiTranslator(ConfigGPT, CommonTranslator):
             self.logger.info(f'Used {self.token_count_last} tokens (Total: {self.token_count})')
 
         return translations
+
+    @staticmethod
+    def parse_numbered_translations(response: str, query_size: int):
+        """
+        Map "<|n|>text" blocks to their line number (1-based). Blocks with no real text
+        (e.g. a stray ">") are ignored. Returns None when the response has no marker.
+        """
+        markers = list(re.finditer(r'<\|(\d+)\|>', response))
+        if not markers:
+            return None
+        by_number = {}
+        for i, marker in enumerate(markers):
+            end = markers[i + 1].start() if i + 1 < len(markers) else len(response)
+            text = response[marker.end():end].strip()
+            if not re.sub(r'[<>|\s]', '', text):
+                continue
+            by_number[int(marker.group(1))] = text
+        return [by_number.get(n, '') for n in range(1, query_size + 1)]
 
     async def _request_translation(self, to_lang: str, prompt: str) -> str:
         messages = [{'role': 'system', 'content': self.chat_system_template.format(to_lang=to_lang)}]
