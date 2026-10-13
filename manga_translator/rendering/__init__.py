@@ -60,8 +60,11 @@ def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside
         return rects
     h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img
-    # Eroding the bright area closes thin gaps and keeps a small distance to the outlines
-    bright = cv2.erode((gray > 200).astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2)
+    # Eroding the free area closes thin gaps and keeps a small distance to the outlines.
+    # Most bubbles are bright; narration boxes can be dark with white text.
+    kernel = np.ones((3, 3), np.uint8)
+    bright = cv2.erode((gray > 200).astype(np.uint8), kernel, iterations=2)
+    dark = cv2.erode((gray < 55).astype(np.uint8), kernel, iterations=2)
 
     boxes = []
     for region in text_regions:
@@ -71,9 +74,10 @@ def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside
     for i, region in enumerate(text_regions):
         if abs(region.angle) > 0.1:
             continue
-        free = bright.copy()
-        # The text itself was removed by inpainting, so its box counts as free space
         x1, y1, x2, y2 = boxes[i]
+        # Background of the text after inpainting tells whether it sits in a bright or dark box
+        free = (dark if gray[y1:y2, x1:x2].size and np.median(gray[y1:y2, x1:x2]) < 80 else bright).copy()
+        # The text itself was removed by inpainting, so its box counts as free space
         free[y1:y2, x1:x2] = 1
         # Other texts are obstacles
         pad = max(2, int(min(h, w) * 0.005))
@@ -145,7 +149,7 @@ def fit_horizontal_font_size(text: str, width: int, height: int, font_size_min: 
         # Without hyphenation a word wider than the box would be cut anywhere ("BUT/TON")
         if not hyphenate and words:
             longest = max(sum(text_render.get_char_offset_x(font_size, c) for c in w) for w in words)
-            if longest > width * 1.1:
+            if longest > width:
                 return False
         lines, widths = text_render.calc_horizontal(font_size, text, width, height, language, hyphenate)
         if not lines:
