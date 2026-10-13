@@ -136,8 +136,9 @@ def CJK_Compatibility_Forms_translate(cdpt: str, direction: int):
 def compact_special_symbols(text: str) -> str:  
     text = text.replace('...', '…')  
     text = text.replace('..', '…')      
-    # Remove half-width and full-width spaces after each punctuation mark
-    pattern = r'([^\w\s])[ \u3000]+'  
+    # Remove half-width and full-width spaces after CJK punctuation only:
+    # in latin languages the space after "?" or "," is required ("thing? Is", "mort, et")
+    pattern = r'([\u3000-\u303f\uff00-\uffef])[ \u3000]+'  
     text = re.sub(pattern, r'\1', text) 
     return text
     

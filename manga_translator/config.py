@@ -184,6 +184,8 @@ class RenderConfig(BaseModel):
     """Maximum factor by which a text box may be enlarged to fit a longer translation. 1.0 keeps the detected box size; the text is shrunk to fit instead"""
     fit_to_bubble: bool = True
     """Render the translation using the whole speech bubble around the detected text instead of only the original text box"""
+    font_size_max_scale: float = 1.3
+    """Horizontal text is enlarged to fill its box (bubble), up to this factor of the original text size"""
     rtl: bool = True
     """Right-to-left reading order for panel and text_region sorting,"""  
     _font_color_fg = None

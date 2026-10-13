@@ -1384,7 +1384,8 @@ class MangaTranslator:
                                               config.render.font_size_offset,
                                               config.render.font_size_minimum, not config.render.no_hyphenation, ctx.render_mask, config.render.line_spacing,
                                               max_box_expansion=config.render.max_box_expansion,
-                                              fit_to_bubble=config.render.fit_to_bubble)
+                                              fit_to_bubble=config.render.fit_to_bubble,
+                                              font_size_max_scale=config.render.font_size_max_scale)
         return output
 
     def _result_path(self, path: str) -> str:

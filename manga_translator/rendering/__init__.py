@@ -90,14 +90,56 @@ def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], max_area_r
             hw, hh = bw * factor / 2, bh * factor / 2
             ix1, iy1, ix2, iy2 = int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)
             inner = component[iy1:iy2, ix1:ix2]
-            if inner.size and inner.mean() >= 0.97:
-                rect = [bx + ix1, by + iy1, bx + ix2, by + iy2]
+            if inner.size and inner.mean() >= 0.99:
+                # Keep a margin so the text does not touch the bubble outline
+                mx, my = int((ix2 - ix1) * 0.06), int((iy2 - iy1) * 0.06)
+                rect = [bx + ix1 + mx, by + iy1 + my, bx + ix2 - mx, by + iy2 - my]
                 if (rect[2] - rect[0]) * (rect[3] - rect[1]) > (rx2 - rx1) * (ry2 - ry1):
                     rects[i] = rect
                 break
     return rects
 
-def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], font_size_fixed: int, font_size_offset: int, font_size_minimum: int, max_box_expansion: float = 1.15, fit_to_bubble: bool = True):  
+def renders_horizontally(region: TextBlock) -> bool:
+    """Same direction choice as render()."""
+    forced_direction = region._direction if hasattr(region, "_direction") else region.direction
+    if forced_direction in ["horizontal", "h"]:
+        return True
+    if forced_direction in ["vertical", "v"]:
+        return False
+    return region.horizontal
+
+def fit_horizontal_font_size(text: str, width: int, height: int, font_size_min: int, font_size_max: int,
+                             language: str = 'en_US', hyphenate: bool = True, line_spacing: float = None) -> int:
+    """
+    Largest font size for which the text, wrapped to width, fits in width x height.
+    Wrapping at the final size gives fewer, longer lines than wrapping at a big size and
+    shrinking the whole block afterwards, so the text ends up bigger.
+    """
+    spacing = line_spacing or 0.01
+
+    def fits(font_size: int) -> bool:
+        lines, widths = text_render.calc_horizontal(font_size, text, width, height, language, hyphenate)
+        if not lines:
+            return True
+        needed_h = font_size * len(lines) + int(font_size * spacing) * (len(lines) - 1)
+        # calc_horizontal may let a line go slightly over max_width: accept it, the box is
+        # squeezed a bit when rendered, which is not visible
+        return max(widths) <= width * 1.1 and needed_h <= height
+
+    font_size_min = max(1, min(font_size_min, font_size_max))
+    if not fits(font_size_min):
+        return font_size_min
+    low, high = font_size_min, font_size_max
+    while low < high:
+        mid = (low + high + 1) // 2
+        if fits(mid):
+            low = mid
+        else:
+            high = mid - 1
+    return low
+
+def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], font_size_fixed: int, font_size_offset: int, font_size_minimum: int, max_box_expansion: float = 1.15, fit_to_bubble: bool = True,
+                                font_size_max_scale: float = 1.3, hyphenate: bool = True, line_spacing: float = None):  
     """
     Adjust text region size to accommodate font size and translated text length.
     
@@ -292,6 +334,20 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
         dst_points[..., 0] = dst_points[..., 0].clip(0, img.shape[1] - 1)
         dst_points[..., 1] = dst_points[..., 1].clip(0, img.shape[0] - 1)
 
+        # Fit horizontal text to its box: biggest size that fits, up to font_size_max_scale
+        # times the original size (a fixed font size is kept as is)
+        if font_size_fixed is None and renders_horizontally(region) and region.translation:
+            pts = dst_points.reshape(-1, 4, 2)[0].astype(np.float64)
+            box_w = int(min(np.linalg.norm(pts[1] - pts[0]), np.linalg.norm(pts[2] - pts[3])))
+            box_h = int(min(np.linalg.norm(pts[3] - pts[0]), np.linalg.norm(pts[2] - pts[1])))
+            if box_w > 0 and box_h > 0:
+                target_font_size = fit_horizontal_font_size(
+                    region.get_translation_for_rendering(), box_w, box_h,
+                    font_size_minimum,
+                    max(font_size_minimum, int(original_region_font_size * font_size_max_scale)),
+                    getattr(region, "target_lang", "en_US"), hyphenate, line_spacing,
+                )
+
         # Store results and update font size
         dst_points_list.append(dst_points)  
         region.font_size = int(target_font_size)
@@ -310,14 +366,16 @@ async def dispatch(
     line_spacing: int = None,
     disable_font_border: bool = False,
     max_box_expansion: float = 1.15,
-    fit_to_bubble: bool = True
+    fit_to_bubble: bool = True,
+    font_size_max_scale: float = 1.3
     ) -> np.ndarray:
 
     text_render.set_font(font_path)
     text_regions = list(filter(lambda region: region.translation, text_regions))
 
     # Resize regions that are too small
-    dst_points_list = resize_regions_to_font_size(img, text_regions, font_size_fixed, font_size_offset, font_size_minimum, max_box_expansion, fit_to_bubble)
+    dst_points_list = resize_regions_to_font_size(img, text_regions, font_size_fixed, font_size_offset, font_size_minimum, max_box_expansion, fit_to_bubble,
+                                                  font_size_max_scale, hyphenate, line_spacing)
 
     # TODO: Maybe remove intersections
 
