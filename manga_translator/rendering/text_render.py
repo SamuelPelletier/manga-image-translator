@@ -582,7 +582,9 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
     x, y, w, h = cv2.boundingRect(canvas_border)
     return line_box[y:y+h, x:x+w]
 
+@functools.lru_cache(maxsize=32)
 def select_hyphenator(lang: str):
+    # Cached: loading a dictionary is slow and this is called for every line layout
     lang = standardize_tag(lang)
     # Translator codes are 3 letters ("FRA", "ESP"): use the 2 letter language ("fr", "es")
     try:

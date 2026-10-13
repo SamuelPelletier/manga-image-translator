@@ -178,20 +178,19 @@ def fit_horizontal_font_size(text: str, width: int, height: int, font_size_min: 
         return max(widths) <= width * 1.05 and needed_h <= height
 
     font_size_min = max(1, min(font_size_min, font_size_max))
-    low, high = font_size_min, font_size_max
-    if not fits(font_size_min):
-        # Too much text for the box: go below the minimum rather than cutting words,
-        # but not below 60% of it
-        low, high = max(1, int(font_size_min * 0.6)), font_size_min
-        if not fits(low):
-            return low
-    while low < high:
-        mid = (low + high + 1) // 2
-        if fits(mid):
-            low = mid
-        else:
-            high = mid - 1
-    return low
+    # Scan from the biggest size down: line breaking is not monotonic (a size can fit while a
+    # slightly smaller one does not), so a binary search can miss the best size.
+    # Too much text for the box: go below the minimum rather than cutting words,
+    # but not below 60% of it.
+    lowest = max(1, int(font_size_min * 0.6))
+    # Text cannot fill more than the box: start from the size where its glyphs alone would
+    # cover the whole area (characters are about 0.5 em wide), which skips most sizes
+    char_count = max(1, len(text))
+    upper = int((width * height / (char_count * 0.5)) ** 0.5) + 1
+    for font_size in range(min(font_size_max, max(upper, lowest)), lowest - 1, -1):
+        if fits(font_size):
+            return font_size
+    return lowest
 
 def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock'], font_size_fixed: int, font_size_offset: int, font_size_minimum: int, max_box_expansion: float = 1.15, fit_to_bubble: bool = True,
                                 font_size_max_scale: float = 1.3, hyphenate: bool = True, line_spacing: float = None):  
