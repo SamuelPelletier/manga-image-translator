@@ -16,7 +16,7 @@ CONFIG_FILE="${CONFIG_FILE:-$APP_DIR/batch/config.json}"
 LOG_DIR="${LOG_DIR:-$APP_DIR/batch/logs}"
 LOCK_FILE="${LOCK_FILE:-/tmp/manga-translate.lock}"
 # Police de BD et qualité JPEG des pages traduites
-FONT_PATH="${FONT_PATH:-$APP_DIR/fonts/anime_ace_3.ttf}"
+FONT_PATH="${FONT_PATH:-$APP_DIR/fonts/comic shanns 2.ttf}"
 SAVE_QUALITY="${SAVE_QUALITY:-85}"
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"

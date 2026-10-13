@@ -230,6 +230,8 @@ def set_font(font_path: str):
     else:
         selection = FALLBACK_FONTS
     FONT_SELECTION = [get_cached_font(p) for p in selection]
+    # Glyphs are cached by character and size only: drop them when the font changes
+    get_char_glyph.cache_clear()
 
 class namespace:
     pass

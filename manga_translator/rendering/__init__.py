@@ -116,8 +116,14 @@ def fit_horizontal_font_size(text: str, width: int, height: int, font_size_min: 
     shrinking the whole block afterwards, so the text ends up bigger.
     """
     spacing = line_spacing or 0.01
+    words = [w for w in text.split() if w]
 
     def fits(font_size: int) -> bool:
+        # Without hyphenation a word wider than the box would be cut anywhere ("BUT/TON")
+        if not hyphenate and words:
+            longest = max(sum(text_render.get_char_offset_x(font_size, c) for c in w) for w in words)
+            if longest > width * 1.1:
+                return False
         lines, widths = text_render.calc_horizontal(font_size, text, width, height, language, hyphenate)
         if not lines:
             return True
@@ -127,9 +133,13 @@ def fit_horizontal_font_size(text: str, width: int, height: int, font_size_min: 
         return max(widths) <= width * 1.1 and needed_h <= height
 
     font_size_min = max(1, min(font_size_min, font_size_max))
-    if not fits(font_size_min):
-        return font_size_min
     low, high = font_size_min, font_size_max
+    if not fits(font_size_min):
+        # Too much text for the box: go below the minimum rather than cutting words,
+        # but not below 60% of it
+        low, high = max(1, int(font_size_min * 0.6)), font_size_min
+        if not fits(low):
+            return low
     while low < high:
         mid = (low + high + 1) // 2
         if fits(mid):
