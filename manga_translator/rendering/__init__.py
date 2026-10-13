@@ -45,7 +45,8 @@ def count_text_length(text: str) -> float:
             length += 1.0
     return length
 
-def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside: float = 0.999) -> List:
+def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside: float = 0.98,
+                      max_ink: float = 0.001) -> List:
     """
     Find, for each text region, a rectangle of free space around it inside its speech bubble.
 
@@ -65,6 +66,10 @@ def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside
     kernel = np.ones((3, 3), np.uint8)
     bright = cv2.erode((gray > 200).astype(np.uint8), kernel, iterations=2)
     dark = cv2.erode((gray < 55).astype(np.uint8), kernel, iterations=2)
+    # Ink: clearly dark lines (outlines, sound effects) a bright rectangle must not cross,
+    # while some light gray (paper texture, faint tone) is tolerated by min_inside
+    ink = (gray < 100).astype(np.uint8)
+    paper = (gray > 160).astype(np.uint8)
 
     boxes = []
     for region in text_regions:
@@ -76,7 +81,10 @@ def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside
             continue
         x1, y1, x2, y2 = boxes[i]
         # Background of the text after inpainting tells whether it sits in a bright or dark box
-        free = (dark if gray[y1:y2, x1:x2].size and np.median(gray[y1:y2, x1:x2]) < 80 else bright).copy()
+        dark_box = gray[y1:y2, x1:x2].size > 0 and np.median(gray[y1:y2, x1:x2]) < 80
+        free = (dark if dark_box else bright).copy()
+        # In a dark box the "ink" not to cross is the bright art around it
+        obstacle = (paper if dark_box else ink).copy()
         # The text itself was removed by inpainting, so its box counts as free space
         free[y1:y2, x1:x2] = 1
         # Other texts are obstacles
@@ -85,11 +93,16 @@ def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside
             if j != i:
                 free[max(0, oy1 - pad):oy2 + pad, max(0, ox1 - pad):ox2 + pad] = 0
         integral = cv2.integral(free)
+        ink_integral = cv2.integral(obstacle)
 
-        def inside_ratio(rx1, ry1, rx2, ry2):
+        def ratio(table, rx1, ry1, rx2, ry2):
             area = (rx2 - rx1) * (ry2 - ry1)
-            total = integral[ry2, rx2] - integral[ry1, rx2] - integral[ry2, rx1] + integral[ry1, rx1]
+            total = table[ry2, rx2] - table[ry1, rx2] - table[ry2, rx1] + table[ry1, rx1]
             return total / area if area > 0 else 0
+
+        def fits_rect(rx1, ry1, rx2, ry2):
+            return (ratio(integral, rx1, ry1, rx2, ry2) >= min_inside
+                    and ratio(ink_integral, rx1, ry1, rx2, ry2) <= max_ink)
 
         # Largest rectangle around the text centre, for several aspect ratios (bubbles are
         # often ellipses: a tall text column does not tell the shape of the free space)
@@ -106,7 +119,7 @@ def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside
                         mid = (low + high + 1) // 2
                         hw, hh = mid * aspect, mid
                         rx1, ry1, rx2, ry2 = int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)
-                        if rx1 >= 0 and ry1 >= 0 and rx2 <= w and ry2 <= h and inside_ratio(rx1, ry1, rx2, ry2) >= min_inside:
+                        if rx1 >= 0 and ry1 >= 0 and rx2 <= w and ry2 <= h and fits_rect(rx1, ry1, rx2, ry2):
                             low = mid
                         else:
                             high = mid - 1
