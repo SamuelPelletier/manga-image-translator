@@ -45,7 +45,7 @@ def count_text_length(text: str) -> float:
             length += 1.0
     return length
 
-def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside: float = 0.98) -> List:
+def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside: float = 0.995) -> List:
     """
     Find, for each text region, a rectangle of free space around it inside its speech bubble.
 
@@ -143,13 +143,18 @@ def fit_horizontal_font_size(text: str, width: int, height: int, font_size_min: 
     shrinking the whole block afterwards, so the text ends up bigger.
     """
     spacing = line_spacing or 0.01
-    words = [w for w in text.split() if w]
+    # Smallest pieces a line can be broken into: words, or their syllables with hyphenation.
+    # A piece wider than the box would be cut anywhere ("BUT/TON", "MORNI-NG").
+    units = [w for w in text.split() if w]
+    hyphenator = text_render.select_hyphenator(language) if hyphenate else None
+    if hyphenator:
+        units = [syl for w in units for syl in (text_render.word_syllables(hyphenator, w) or [w])]
 
     def fits(font_size: int) -> bool:
-        # Without hyphenation a word wider than the box would be cut anywhere ("BUT/TON")
-        if not hyphenate and words:
-            longest = max(sum(text_render.get_char_offset_x(font_size, c) for c in w) for w in words)
-            if longest > width:
+        if units:
+            hyphen_w = text_render.get_char_offset_x(font_size, '-') if hyphenator else 0
+            longest = max(sum(text_render.get_char_offset_x(font_size, c) for c in u) for u in units)
+            if longest + hyphen_w > width:
                 return False
         lines, widths = text_render.calc_horizontal(font_size, text, width, height, language, hyphenate)
         if not lines:
@@ -378,12 +383,18 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
             box_w = int(min(np.linalg.norm(pts[1] - pts[0]), np.linalg.norm(pts[2] - pts[3])))
             box_h = int(min(np.linalg.norm(pts[3] - pts[0]), np.linalg.norm(pts[2] - pts[1])))
             if box_w > 0 and box_h > 0:
-                target_font_size = fit_horizontal_font_size(
-                    region.get_translation_for_rendering(), box_w, box_h,
-                    font_size_minimum,
-                    max(font_size_minimum, int(original_region_font_size * font_size_max_scale)),
-                    getattr(region, "target_lang", "en_US"), hyphenate, line_spacing,
-                )
+                fit_args = (region.get_translation_for_rendering(), box_w, box_h,
+                            font_size_minimum,
+                            max(font_size_minimum, int(original_region_font_size * font_size_max_scale)),
+                            getattr(region, "target_lang", "en_US"))
+                target_font_size = fit_horizontal_font_size(*fit_args, hyphenate, line_spacing)
+                # Narrow box: when whole words force the text under the minimum size,
+                # hyphenate at syllables instead ("MORN-ING")
+                if not hyphenate and target_font_size < font_size_minimum:
+                    hyphenated_size = fit_horizontal_font_size(*fit_args, True, line_spacing)
+                    if hyphenated_size > target_font_size:
+                        target_font_size = hyphenated_size
+                        region._hyphenate = True
 
         # Store results and update font size
         dst_points_list.append(dst_points)  
@@ -422,7 +433,7 @@ async def dispatch(
         if render_mask is not None:
             # set render_mask to 1 for the region that is inside dst_points
             cv2.fillConvexPoly(render_mask, dst_points.astype(np.int32), 1)
-        img = render(img, region, dst_points, hyphenate, line_spacing, disable_font_border)
+        img = render(img, region, dst_points, getattr(region, '_hyphenate', hyphenate), line_spacing, disable_font_border)
     return img
 
 def render(

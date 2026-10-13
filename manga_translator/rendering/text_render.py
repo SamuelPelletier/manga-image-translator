@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Tuple, Optional, List
 from hyphen import Hyphenator
 from hyphen.dictools import LANGUAGES as HYPHENATOR_LANGUAGES
-from langcodes import standardize_tag
+from langcodes import standardize_tag, Language
 
 from ..utils import BASE_PATH, is_punctuation
 
@@ -584,6 +584,11 @@ def put_text_vertical(font_size: int, text: str, h: int, alignment: str, fg: Tup
 
 def select_hyphenator(lang: str):
     lang = standardize_tag(lang)
+    # Translator codes are 3 letters ("FRA", "ESP"): use the 2 letter language ("fr", "es")
+    try:
+        lang = Language.get(lang).language or lang
+    except Exception:
+        pass
     if lang not in HYPHENATOR_LANGUAGES:
         for avail_lang in reversed(HYPHENATOR_LANGUAGES):
             if avail_lang.startswith(lang):
@@ -595,6 +600,28 @@ def select_hyphenator(lang: str):
         return Hyphenator(lang)
     except Exception:
         return None
+
+def word_syllables(hyphenator, word: str) -> List[str]:
+    """
+    Syllables of a word, keeping its case and the punctuation around it:
+    the dictionaries only know lowercase words without punctuation ("MORNING..." -> MORN, ING...).
+    """
+    match = re.match(r'^(\W*)(.*?)(\W*)$', word)
+    prefix, core, suffix = match.groups()
+    if not core:
+        return []
+    syllables = hyphenator.syllables(core.lower())
+    if len(syllables) < 2:
+        return []
+    result, pos = [], 0
+    for syl in syllables:
+        result.append(core[pos:pos + len(syl)])
+        pos += len(syl)
+    if pos != len(core):
+        return []
+    result[0] = prefix + result[0]
+    result[-1] = result[-1] + suffix
+    return result
 
 # @functools.lru_cache(maxsize = 1024, typed = True)
 def get_char_offset_x(font_size: int, cdpt: str):
@@ -647,7 +674,7 @@ def calc_horizontal(font_size: int, text: str, max_width: int, max_height: int, 
         new_syls = []
         if hyphenator and len(word) <= 100:
             try:
-                new_syls = hyphenator.syllables(word)
+                new_syls = word_syllables(hyphenator, word)
             except Exception:
                 new_syls = []
         if len(new_syls) == 0:
