@@ -381,6 +381,7 @@ async def dispatch(
     ) -> np.ndarray:
 
     text_render.set_font(font_path)
+    logger.info(f'Font: {text_render.FONT_SELECTION[0].family_name.decode(errors="replace")} ({font_path or "default"})')
     text_regions = list(filter(lambda region: region.translation, text_regions))
 
     # Resize regions that are too small
