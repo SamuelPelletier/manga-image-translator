@@ -1,4 +1,5 @@
 import re
+import json
 
 from ..config import TranslatorConfig
 from .config_gpt import ConfigGPT  # Import the `gpt_config` parsing parent class
@@ -11,7 +12,7 @@ import asyncio
 import time
 from typing import List
 from .common import CommonTranslator, VALID_LANGUAGES
-from .keys import CUSTOM_OPENAI_API_KEY, CUSTOM_OPENAI_API_BASE, CUSTOM_OPENAI_MODEL, CUSTOM_OPENAI_MODEL_CONF
+from .keys import CUSTOM_OPENAI_API_KEY, CUSTOM_OPENAI_API_BASE, CUSTOM_OPENAI_MODEL, CUSTOM_OPENAI_MODEL_CONF, CUSTOM_OPENAI_EXTRA_BODY
 
 
 class CustomOpenAiTranslator(ConfigGPT, CommonTranslator):
@@ -260,7 +261,12 @@ class CustomOpenAiTranslator(ConfigGPT, CommonTranslator):
             max_tokens=self._MAX_TOKENS // 2,
             temperature=self.temperature,
             top_p=self.top_p,
+            extra_body=json.loads(CUSTOM_OPENAI_EXTRA_BODY) if CUSTOM_OPENAI_EXTRA_BODY else None,
         )
+
+        if response.choices[0].message.content is None:
+            # Thinking models may spend all their tokens reasoning (see CUSTOM_OPENAI_EXTRA_BODY)
+            raise Exception(f'Empty response from the model (finish reason: {response.choices[0].finish_reason})')
 
         self.logger.debug('\n-- GPT Response (raw) --')
         self.logger.debug(response.choices[0].message.content)

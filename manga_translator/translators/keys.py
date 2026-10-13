@@ -46,4 +46,5 @@ TOGETHER_VL_MODEL = os.getenv('TOGETHER_VL_MODEL', 'Qwen/Qwen2.5-VL-72B-Instruct
 CUSTOM_OPENAI_API_KEY = os.getenv('CUSTOM_OPENAI_API_KEY', 'ollama') # Unsed for ollama, but maybe useful for other LLM tools.
 CUSTOM_OPENAI_API_BASE = os.getenv('CUSTOM_OPENAI_API_BASE', 'http://localhost:11434/v1') # Use OLLAMA_HOST env to change binding IP and Port.
 CUSTOM_OPENAI_MODEL = os.getenv('CUSTOM_OPENAI_MODEL', '') # e.g "qwen2.5:7b". Make sure to pull and run it before use.
-CUSTOM_OPENAI_MODEL_CONF = os.getenv('CUSTOM_OPENAI_MODEL_CONF', '') # e.g "qwen2".
+CUSTOM_OPENAI_MODEL_CONF = os.getenv('CUSTOM_OPENAI_MODEL_CONF', '')
+CUSTOM_OPENAI_EXTRA_BODY = os.getenv('CUSTOM_OPENAI_EXTRA_BODY', '') # JSON added to each request, e.g. '{"chat_template_kwargs": {"enable_thinking": false}}' to turn off the thinking mode of Qwen # e.g "qwen2".
