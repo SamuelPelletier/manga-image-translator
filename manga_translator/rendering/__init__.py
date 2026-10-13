@@ -396,6 +396,11 @@ def resize_regions_to_font_size(img: np.ndarray, text_regions: List['TextBlock']
                         target_font_size = hyphenated_size
                         region._hyphenate = True
 
+        logger.debug(f'Text "{region.translation[:30]}": text box {[int(v) for v in region.xyxy]}, '
+                     f'bubble {bubble_rect}, render box {dst_points.reshape(-1, 2).min(0).tolist() + dst_points.reshape(-1, 2).max(0).tolist()}, '
+                     f'font {original_region_font_size} -> {int(target_font_size)}'
+                     f'{" (hyphenated)" if getattr(region, "_hyphenate", False) else ""}')
+
         # Store results and update font size
         dst_points_list.append(dst_points)  
         region.font_size = int(target_font_size)
