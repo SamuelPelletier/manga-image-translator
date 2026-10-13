@@ -45,58 +45,81 @@ def count_text_length(text: str) -> float:
             length += 1.0
     return length
 
-def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], max_area_ratio: float = 0.2) -> List:
+def find_bubble_rects(img: np.ndarray, text_regions: List[TextBlock], min_inside: float = 0.98) -> List:
     """
-    Find, for each text region, the inner rectangle of the speech bubble surrounding it.
+    Find, for each text region, a rectangle of free space around it inside its speech bubble.
 
-    Works on the inpainted image: the bubble interior is a large uniform bright area
-    once the original text has been removed. Returns a list of [x1, y1, x2, y2] or None.
+    Works on the inpainted image, where the bubble interior is bright once the original text
+    is removed. The rectangle starts at the text box and grows side by side while the new strip
+    stays bright: a bubble that "leaks" into the background through a small gap in its outline
+    does not drag the rectangle outside, and regions sharing a bubble stop at each other.
+    Returns a list of [x1, y1, x2, y2] or None.
     """
     rects = [None] * len(text_regions)
     if len(text_regions) == 0:
         return rects
+    h, w = img.shape[:2]
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY) if img.ndim == 3 else img
-    bright = (gray > 200).astype(np.uint8)
-    n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(bright, connectivity=4)
-    img_area = img.shape[0] * img.shape[1]
+    # Eroding the bright area closes thin gaps and keeps a small distance to the outlines
+    bright = cv2.erode((gray > 200).astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2)
 
-    region_labels = []
+    boxes = []
     for region in text_regions:
         x1, y1, x2, y2 = [int(v) for v in region.xyxy]
-        x1, y1 = max(0, x1), max(0, y1)
-        x2, y2 = min(img.shape[1], x2), min(img.shape[0], y2)
-        patch = labels[y1:y2, x1:x2]
-        patch = patch[patch > 0]
-        if patch.size == 0:
-            region_labels.append(0)
-            continue
-        label = int(np.bincount(patch).argmax())
-        region_labels.append(label)
+        boxes.append([max(0, x1), max(0, y1), min(w, x2), min(h, y2)])
 
-    for i, (region, label) in enumerate(zip(text_regions, region_labels)):
-        # Skip background, shared bubbles (several regions in one bubble) and rotated text
-        if label == 0 or region_labels.count(label) > 1 or abs(region.angle) > 0.1:
+    for i, region in enumerate(text_regions):
+        if abs(region.angle) > 0.1:
             continue
-        bx, by, bw, bh, area = stats[label]
-        if area > img_area * max_area_ratio or area < bw * bh * 0.4:
-            continue
-        rx1, ry1, rx2, ry2 = region.xyxy
-        if area < (rx2 - rx1) * (ry2 - ry1):
-            continue
-        component = labels[by:by + bh, bx:bx + bw] == label
-        cx, cy = bw / 2, bh / 2
-        # Shrink the bubble bounding box until it lies (almost) entirely inside the bubble
-        for factor in np.arange(0.9, 0.55, -0.05):
-            hw, hh = bw * factor / 2, bh * factor / 2
-            ix1, iy1, ix2, iy2 = int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)
-            inner = component[iy1:iy2, ix1:ix2]
-            if inner.size and inner.mean() >= 0.99:
-                # Keep a margin so the text does not touch the bubble outline
-                mx, my = int((ix2 - ix1) * 0.06), int((iy2 - iy1) * 0.06)
-                rect = [bx + ix1 + mx, by + iy1 + my, bx + ix2 - mx, by + iy2 - my]
-                if (rect[2] - rect[0]) * (rect[3] - rect[1]) > (rx2 - rx1) * (ry2 - ry1):
-                    rects[i] = rect
-                break
+        free = bright.copy()
+        # The text itself was removed by inpainting, so its box counts as free space
+        x1, y1, x2, y2 = boxes[i]
+        free[y1:y2, x1:x2] = 1
+        # Other texts are obstacles
+        pad = max(2, int(min(h, w) * 0.005))
+        for j, (ox1, oy1, ox2, oy2) in enumerate(boxes):
+            if j != i:
+                free[max(0, oy1 - pad):oy2 + pad, max(0, ox1 - pad):ox2 + pad] = 0
+        integral = cv2.integral(free)
+
+        def inside_ratio(rx1, ry1, rx2, ry2):
+            area = (rx2 - rx1) * (ry2 - ry1)
+            total = integral[ry2, rx2] - integral[ry1, rx2] - integral[ry2, rx1] + integral[ry1, rx1]
+            return total / area if area > 0 else 0
+
+        # Largest rectangle around the text centre, for several aspect ratios (bubbles are
+        # often ellipses: a tall text column does not tell the shape of the free space)
+        # The text is not always in the middle of its bubble: also try centres around it
+        tcx, tcy = (x1 + x2) / 2, (y1 + y2) / 2
+        bw_, bh_ = x2 - x1, y2 - y1
+        best = None
+        for dx in (-0.5, -0.25, 0, 0.25, 0.5):
+            for dy in (-0.5, -0.25, 0, 0.25, 0.5):
+                cx, cy = tcx + dx * bw_, tcy + dy * bh_
+                for aspect in (0.5, 0.7, 0.85, 1.0, 1.2, 1.45, 1.75, 2.1, 2.6):
+                    low, high = 1, max(w, h)
+                    while low < high:
+                        mid = (low + high + 1) // 2
+                        hw, hh = mid * aspect, mid
+                        rx1, ry1, rx2, ry2 = int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)
+                        if rx1 >= 0 and ry1 >= 0 and rx2 <= w and ry2 <= h and inside_ratio(rx1, ry1, rx2, ry2) >= min_inside:
+                            low = mid
+                        else:
+                            high = mid - 1
+                    hw, hh = low * aspect, low
+                    rect = [int(cx - hw), int(cy - hh), int(cx + hw), int(cy + hh)]
+                    # Must still cover the text centre, i.e. be the same bubble
+                    if not (rect[0] <= tcx <= rect[2] and rect[1] <= tcy <= rect[3]):
+                        continue
+                    area = (rect[2] - rect[0]) * (rect[3] - rect[1])
+                    if best is None or area > best[0]:
+                        best = (area, rect)
+
+        # Only keep it when it is clearly bigger than the text box
+        if best is not None and best[0] > (x2 - x1) * (y2 - y1) * 1.3:
+            rx1, ry1, rx2, ry2 = best[1]
+            mx, my = int((rx2 - rx1) * 0.04), int((ry2 - ry1) * 0.04)
+            rects[i] = [rx1 + mx, ry1 + my, rx2 - mx, ry2 - my]
     return rects
 
 def renders_horizontally(region: TextBlock) -> bool:
