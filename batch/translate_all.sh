@@ -59,7 +59,9 @@ translate() {
     local run_log
     run_log="$(mktemp)"
     local ok=1
-    if ! venv/bin/python -m manga_translator --font-path "$FONT_PATH" local \
+    # --font-path doit venir après "local" : placé avant, il est écrasé par la valeur
+    # par défaut de la sous-commande
+    if ! venv/bin/python -m manga_translator local --font-path "$FONT_PATH" \
             -i "$src" -o "$dest" \
             --config-file "$config" --save-quality "$SAVE_QUALITY" 2>&1 | tee -a "$LOG_FILE" "$run_log"; then
         ok=0
