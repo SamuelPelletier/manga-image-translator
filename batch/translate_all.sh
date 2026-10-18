@@ -18,6 +18,8 @@ LOCK_FILE="${LOCK_FILE:-/tmp/manga-translate.lock}"
 # Police de BD et qualité JPEG des pages traduites
 FONT_PATH="${FONT_PATH:-$APP_DIR/fonts/comic shanns 2.ttf}"
 SAVE_QUALITY="${SAVE_QUALITY:-85}"
+# Nombre d'échecs avant d'abandonner un manga (.failed)
+MAX_FAILURES="${MAX_FAILURES:-3}"
 
 mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
 LOG_FILE="$LOG_DIR/$(date +%Y-%m-%d_%H-%M-%S)_$$.log"
@@ -46,11 +48,12 @@ count_images() {
 
 # translate <dossier source> <dossier destination> <fichier config> [mark_done]
 # Avec mark_done=1, écrit <destination>/.done quand toutes les pages sont traduites
-# sans erreur ; un dossier qui a déjà son .done n'est plus retraité.
+# sans erreur ; un dossier qui a déjà son .done n'est plus retraité. Après MAX_FAILURES
+# échecs, écrit <destination>/.failed et abandonne ce manga (il ne bloque plus la file).
 translate() {
     local src="$1" dest="$2" config="$3" mark_done="${4:-0}"
     local label="${src#$INPUT_DIR/}"
-    if [[ "$mark_done" == 1 && -f "$dest/.done" ]]; then
+    if [[ "$mark_done" == 1 && ( -f "$dest/.done" || -f "$dest/.failed" ) ]]; then
         return
     fi
     worked=1
@@ -75,6 +78,15 @@ translate() {
     if [[ "$ok" == 0 ]]; then
         echo "[$(date)] ERREUR sur $label (voir $LOG_FILE)" | tee -a "$LOG_FILE"
         status=1
+        if [[ "$mark_done" == 1 ]]; then
+            mkdir -p "$dest"
+            local failures=$(( $(cat "$dest/.failures" 2>/dev/null || echo 0) + 1 ))
+            echo "$failures" > "$dest/.failures"
+            if [[ "$failures" -ge "$MAX_FAILURES" ]]; then
+                echo "$(date) : abandon après $failures échecs, voir $LOG_FILE" > "$dest/.failed"
+                echo "[$(date)] $label abandonné après $failures échecs (.failed écrit)" | tee -a "$LOG_FILE"
+            fi
+        fi
         return
     fi
 
@@ -83,6 +95,7 @@ translate() {
         in_count="$(count_images "$src")"
         out_count="$(count_images "$dest")"
         if [[ "$in_count" -gt 0 && "$out_count" -ge "$in_count" ]]; then
+            rm -f "$dest/.failures"
             touch "$dest/.done"
             echo "[$(date)] $label terminé ($out_count/$in_count pages), .done écrit" | tee -a "$LOG_FILE"
         else

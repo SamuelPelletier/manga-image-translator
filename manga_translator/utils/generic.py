@@ -446,7 +446,9 @@ class Quadrilateral(object):
         [l1a, l1b, l2a, l2b] = [a.astype(np.float32) for a in self.structure]
         v_vec = l1b - l1a
         h_vec = l2b - l2a
-        ratio = np.linalg.norm(v_vec) / np.linalg.norm(h_vec)
+        v_len, h_len = np.linalg.norm(v_vec), np.linalg.norm(h_vec)
+        # A degenerate textline (zero width or height) gives a small blank region below
+        ratio = v_len / h_len if v_len >= 1 and h_len >= 1 else 1.0
 
         src_pts = self.pts.astype(np.int64).copy()
         im_h, im_w = img.shape[:2]
@@ -469,6 +471,9 @@ class Quadrilateral(object):
             w = max(int(round(textheight / ratio)), 2)
             dst_pts = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]]).astype(np.float32)
             M, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+            if img_croped.size == 0 or M is None:
+                # Degenerate textline (no area, or outside the image): nothing to read
+                return np.zeros((h, w) + img.shape[2:], dtype=img.dtype)
             region = cv2.warpPerspective(img_croped, M, (w, h))
             return region
         elif direction == 'v':
@@ -476,6 +481,9 @@ class Quadrilateral(object):
             h = max(int(round(textheight * ratio)), 2)
             dst_pts = np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]]).astype(np.float32)
             M, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+            if img_croped.size == 0 or M is None:
+                # Degenerate textline (no area, or outside the image): nothing to read
+                return np.zeros((w, h) + img.shape[2:], dtype=img.dtype)
             region = cv2.warpPerspective(img_croped, M, (w, h))
             region = cv2.rotate(region, cv2.ROTATE_90_COUNTERCLOCKWISE)
             return region
