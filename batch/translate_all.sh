@@ -68,6 +68,11 @@ record_failure() {
 translate() {
     local src="$1" dest="$2" config="$3" mark_done="${4:-0}"
     local label="${src#$INPUT_DIR/}"
+    # Le dossier a pu disparaître depuis le début du passage (manga importé entre-temps) :
+    # sans ce test, le traducteur créerait un dossier de sortie vide
+    if [[ ! -d "$src" ]]; then
+        return
+    fi
     if [[ "$mark_done" == 1 && ( -f "$dest/.done" || -f "$dest/.failed" ) ]]; then
         return
     fi
