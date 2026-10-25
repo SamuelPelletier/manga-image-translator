@@ -46,10 +46,25 @@ count_images() {
     find "$1" -type f 2>/dev/null | grep -Eic '\.(jpe?g|png|webp)$' || true
 }
 
+# record_failure <dossier destination> <libellé>
+# Compte un échec ; au bout de MAX_FAILURES, écrit .failed pour abandonner ce manga.
+record_failure() {
+    local dest="$1" label="$2"
+    status=1
+    mkdir -p "$dest"
+    local failures=$(( $(cat "$dest/.failures" 2>/dev/null || echo 0) + 1 ))
+    echo "$failures" > "$dest/.failures"
+    if [[ "$failures" -ge "$MAX_FAILURES" ]]; then
+        echo "$(date) : abandon après $failures échecs, voir $LOG_FILE" > "$dest/.failed"
+        echo "[$(date)] $label abandonné après $failures échecs (.failed écrit)" | tee -a "$LOG_FILE"
+    fi
+}
+
 # translate <dossier source> <dossier destination> <fichier config> [mark_done]
 # Avec mark_done=1, écrit <destination>/.done quand toutes les pages sont traduites
 # sans erreur ; un dossier qui a déjà son .done n'est plus retraité. Après MAX_FAILURES
-# échecs, écrit <destination>/.failed et abandonne ce manga (il ne bloque plus la file).
+# échecs (erreur ou manga resté incomplet), écrit <destination>/.failed et abandonne ce
+# manga : il ne bloque plus la file.
 translate() {
     local src="$1" dest="$2" config="$3" mark_done="${4:-0}"
     local label="${src#$INPUT_DIR/}"
@@ -73,24 +88,25 @@ translate() {
     if grep -q '^ERROR' "$run_log"; then
         ok=0
     fi
-    rm -f "$run_log"
 
     if [[ "$ok" == 0 ]]; then
+        rm -f "$run_log"
         echo "[$(date)] ERREUR sur $label (voir $LOG_FILE)" | tee -a "$LOG_FILE"
-        status=1
-        if [[ "$mark_done" == 1 ]]; then
-            mkdir -p "$dest"
-            local failures=$(( $(cat "$dest/.failures" 2>/dev/null || echo 0) + 1 ))
-            echo "$failures" > "$dest/.failures"
-            if [[ "$failures" -ge "$MAX_FAILURES" ]]; then
-                echo "$(date) : abandon après $failures échecs, voir $LOG_FILE" > "$dest/.failed"
-                echo "[$(date)] $label abandonné après $failures échecs (.failed écrit)" | tee -a "$LOG_FILE"
-            fi
-        fi
+        [[ "$mark_done" == 1 ]] && record_failure "$dest" "$label"
         return
     fi
 
     if [[ "$mark_done" == 1 ]]; then
+        # Pages illisibles (fichier abîmé dans le manga d'origine) : le traducteur les saute
+        # avec un simple avertissement. On les copie telles quelles pour que le manga traduit
+        # ait toutes ses pages, comme l'original.
+        local page
+        while IFS= read -r page; do
+            [[ -f "$page" && ! -e "$dest/$(basename "$page")" ]] || continue
+            cp "$page" "$dest/"
+            echo "[$(date)] $label : page illisible $(basename "$page") copiée telle quelle" | tee -a "$LOG_FILE"
+        done < <(sed -n 's/^WARNING: \[local\] Failed to open image: //p' "$run_log")
+
         local in_count out_count
         in_count="$(count_images "$src")"
         out_count="$(count_images "$dest")"
@@ -100,9 +116,10 @@ translate() {
             echo "[$(date)] $label terminé ($out_count/$in_count pages), .done écrit" | tee -a "$LOG_FILE"
         else
             echo "[$(date)] $label incomplet ($out_count/$in_count pages)" | tee -a "$LOG_FILE"
-            status=1
+            record_failure "$dest" "$label"
         fi
     fi
+    rm -f "$run_log"
 }
 
 for entry in "$INPUT_DIR"/*/; do
